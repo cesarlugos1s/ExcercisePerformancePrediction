@@ -1,0 +1,136 @@
+---
+title: "Excercise performance analysis and prediction"
+author: "Cesar Lugo"
+date: "November 24, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Excercise performance analysis and prediction
+
+## Executive summary
+In this report we analized weight lifting human activity recognition data that was extracted using data collection devices on six healthy persons. This is because this way we can help people in their excercise and training by telling them if they are doing well so they can know when they should correct their excercising techniqes.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#dataset#ixzz4QyMvpgg2
+
+We applied data science through regression models and machine learning to create a prediction model for the class of performance achieved. Also, we quantify the expected out of sample error. Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#wle_paper_section#ixzz4QyKULbdM
+
+## Data gathering, pre procesing and cleansing
+First we get the data for testing and training, and clean it.
+
+```{r setup1, include=FALSE, echo=FALSE}
+set.seed(1234)
+require(ggplot2)
+require(gridExtra)
+require(knitr)
+require(caret)
+require(rattle)
+require(randomForest)
+require(gbm)
+require(rpart)
+require(rpart.plot)
+
+# Read the training and testing data sets excluding null and div by 0 values
+pmlTraining <- read.csv("pml-training.csv",na.strings = c("#DIV/0!","NA", ""))
+pmlTesting <- read.csv("pml-testing.csv",na.strings = c("#DIV/0!","NA",""))
+
+# Remove the columns as that are irrelevant as predictors or outcome
+pmlTraining <- pmlTraining[,-c(1:5,7)]
+pmlTesting <- pmlTesting[,-c(1:5,7)]
+
+# Remove features with near zero variance as they do not significantly contribute to the model fitting
+nzv <- nearZeroVar(pmlTraining)
+pmlTraining <- pmlTraining[, -nzv]
+
+# Remove all observaciones with missing values of features so we can use the prediction models with better results
+pmlTrainingSource <-pmlTraining[,colSums(is.na(pmlTraining)) == 0]
+pmlTesting <-pmlTesting[,colSums(is.na(pmlTesting)) == 0]
+
+```
+
+## Model fitting for classe outcome
+We try here to fit models to identify which one better explains the classe outcome in the training set. 
+
+### Exploratory data analysis
+Let's take a look at the correlatio coeficcients first for all relevant features as they correlate to the class outcome:
+
+```{r corelations1, include=TRUE, echo=TRUE}
+
+# create partition of the testing set for training and testing models
+intrain <- createDataPartition(y=pmlTrainingSource$classe, p=0.75, list=FALSE)
+pmlTraining <- pmlTrainingSource[intrain, ] 
+pmlTrainingforTest <- pmlTrainingSource[-intrain, ]
+
+# Obtain all potential predictor features by removing the class outcome from the training set
+
+pmlTrainingAllPredictors <- pmlTraining[,-c(grep("classe", names(pmlTraining)))]
+pmlTrainingPredictors <- pmlTraining[,c(grep("magnet_arm_x|accel_arm_x|total_accel_forearm|magnet_dumbbell_z|accel_dumbbell_x|pitch_dumbell|roll_arm|pitch_dumbbell|total_accel_belt|accel_dumbbell_z|magnet_dumbbell_x|roll_belt|yaw_arm|accel_arm_z|roll_dumbbell|gyros_dumbbell_y|roll_forearm|magnet_belt_x|yaw_belt|gyros_belt_x|pitch_belt", names(pmlTraining)))]
+
+# Calculate the correlation of each potential predictor with the outcome classe sorted to identify features with the highest correlation with the classe outcome
+pmlTrainingSummaries <-  pmlTrainingPredictors
+pmlTrainingSummaries$numClasse <- as.numeric(pmlTraining$classe)
+
+kable(data.frame(sort(cor(pmlTrainingSummaries)[c(grep("numClasse", names(pmlTrainingSummaries))),])))
+
+```
+
+We can see that the mostly correlated variables with the classe outcome are magnet_arm_x, accel_arm_x , total_accel_forearm , magnet_dumbbell_z , accel_dumbbell_x , roll_arm , pitch_dumbbell , total_accel_belt , roll_arm, accel_dumbbell_z , magnet_dumbbell_x , roll_belt , yaw_arm , accel_arm_z , roll_dumbbell , gyros_dumbbell_y , roll_forearm , magnet_belt_x , yaw_belt , gyros_belt_x , pitch_belt . We can use these features as predictors in our models.
+
+### Fitting our first prediction model
+Here we fit a first model using the selected features as predictors:
+
+```{r modelFitting1, include=TRUE, echo=TRUE}
+# Fit a model with all features as predictors of the class outcome
+pmlFitAll <- train(x = pmlTrainingPredictors, y = pmlTraining$classe, method = "rpart")
+
+max(pmlFitAll$results$Accuracy)
+
+```
+
+Here we can see that the first model has a low accuracy.
+
+### Fitting our second prediction model
+Now we try to fit another model also using the selected features as predictors:
+
+```{r modelFitting2, include=TRUE, echo=TRUE}
+
+# Fit a model with all features as predictors of the class outcome
+fitCtrl <- trainControl(method = "cv", number = 4, allowParallel = TRUE)
+
+pmlFitAll <- train(x = pmlTrainingPredictors, y = pmlTraining$classe, method = "rf", prof = TRUE, trControl = fitCtrl)
+
+max(pmlFitAll$results$Accuracy)
+
+```
+
+We can see that with this second model we get much better (quite high) accuracy. Hence, we will keep this one as our prediction model.
+
+## Cross Validation
+Here we use our partition obtained from our original test set to perform cross validation, so we can see how our selected prediction model performs.
+
+```{r crossValidation, include=TRUE, echo=TRUE}
+# Predicting:
+predictionRfFitAll <- predict(pmlFitAll, pmlTrainingforTest)
+
+# Test results on TestTrainingSet data set:
+confusionMatrix(predictionRfFitAll, pmlTrainingforTest$classe)
+```
+
+So we can validate that our model has a high accuracy, and confirm the model selection.
+
+## Expected out of sample error
+Now we will take a look at the out of sample error. 
+
+```{r expectedError, include=TRUE, echo=TRUE}
+pmlFitAll$finalModel
+```
+
+With this analysis we can see that the expected out os sample error os very low, being about .84% .
+
+## Conclusions
+Our second and selected fitted model using the selected features as predictors fits very well, with an accuracy higher than 99% and an expected error of about .84% .
